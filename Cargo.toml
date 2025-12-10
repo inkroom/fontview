@@ -1,0 +1,29 @@
+[package]
+name = "fontview"
+version = "0.1.0"
+edition = "2024"
+description="fontview"
+
+[dependencies]
+eframe = "0.32.3"
+egui_extras = {version="0.32.3",  features = ["default"] }
+
+env_logger = {version="0.11.8",optional=true}
+log = {version="0.4.28",optional=true}
+
+rfd = "0.16.0"
+allsorts = "0.16.1"
+encoding_rs = "0.8.35"
+pico-args = "0.5.0"
+ttf-parser = "0.25.1"
+
+
+[features]
+pkg=[]
+print=["dep:log","dep:env_logger"]
+
+
+[package.metadata.bundle]
+identifier="cn.inkroom.clipboard"
+icon = ["img/ico.png"]
+resources=["img"]

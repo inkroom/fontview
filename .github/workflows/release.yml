@@ -1,0 +1,178 @@
+name: release
+
+on:
+  push:
+    branches: ['master']
+    paths-ignore:
+      - 'README.md'
+      - '.gitignore'
+      - '.dockerignore'
+      - 'build.sh'
+  workflow_dispatch:
+env:
+  RUST_VERSION: 1.90.0
+jobs:
+  linux: 
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        id: mini_image_id
+        with:
+          context: .
+          file: .github/workflows/Dockerfile
+          load: true
+          push: false
+          build-args: |
+            RUST_VERSION=${{ env.RUST_VERSION }}
+      - name: Extract Docker Image
+        id: ex
+        run: |
+          sed -ex
+          docker images
+          mini_image_id="${{ steps.mini_image_id.outputs.imageid }}"
+          mini_image_id=${mini_image_id:7}
+          mkdir mini
+          cd mini
+          docker save -o mini.tar $mini_image_id
+          tar xvf mini.tar
+          cat manifest.json
+          tar xvf $(jq --raw-output '.[0].Layers[0]' manifest.json)
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-linux
+          path: mini/app/*
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Rust
+        uses: brndnmtthws/rust-action-rustup@v1
+        with:
+         toolchain: ${{ env.RUST_VERSION }}
+      - name: Build
+        run: |
+          mkdir out
+          cargo build --release && cp target/release/fontview ./out/fontview
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+           name: app-mac-arm
+           path: out/*
+  mac-m1:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Rust
+        uses: brndnmtthws/rust-action-rustup@v1
+        with:
+         toolchain: ${{ env.RUST_VERSION }}
+      - name: Build
+        run: |
+          mkdir out
+          cargo build --release && cp target/release/fontview ./out/fontview-mac-arm
+      - name: Bundle
+        run: |
+          echo "::group::Install Bundle"
+          cargo install cargo-bundle
+          brew install create-dmg
+          echo "::endgroup::"
+
+          echo "::group::Bundle"
+          # 实现dock栏隐藏图标
+          echo "<key>LSUIElement</key>" > info.ext
+          echo "<true/>" >> info.ext
+          echo "" >> Cargo.toml
+          echo 'osx_info_plist_exts=["info.ext"]' >> Cargo.toml
+          cargo bundle -r -f osx --features "pkg" 
+          curr=$(pwd)
+          cd target/release/bundle/osx/
+          tar -cvf fontview.tar fontview.app
+          cd "$curr"
+          mv target/release/bundle/osx/fontview.tar out/
+          echo "::endgroup::"
+
+          echo "::group::Package Dmg"
+          cd target/release/bundle/
+          create-dmg --volname "Font View Installer" --window-pos 200 120 --window-size 800 400 --icon-size 100 --icon "fontview.app" 200 190 --app-drop-link 600 185 --hide-extension "fontview.app" fontview.dmg "osx"
+          mv fontview.dmg ../../../out
+          echo "::endgroup::"
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+           name: app-mac-arm
+           path: out/*
+  release:
+    runs-on: ubuntu-22.04
+    needs: ["mac-m1","linux","windows"]
+    permissions:
+        contents: write
+        packages: write
+    steps:
+        - name: Checkout repository
+          uses: actions/checkout@v5
+          with:
+           fetch-tags: true
+           fetch-depth: 0
+        - name: Download artifacts
+          uses: actions/download-artifact@v4
+          with:
+            merge-multiple: true
+            pattern: app-*
+            path: app/
+        - name: Release Ready
+          id: ready
+          env:
+            GH_TOKEN: ${{ github.token }}
+          run: |
+            new_tag=$(date +%Y%m%d)
+            now_tag=$(curl -sSf https://api.github.com/repos/${{ github.repository}}/releases/latest | jq --raw-output '.tag_name')
+            if [[ "$new_tag" = "$now_tag" ]]; then
+              echo "delete $now_tag"
+              gh release delete $now_tag
+              now_tag=$(curl -sSf https://api.github.com/repos/${{ github.repository}}/releases | jq --raw-output '.[0].tag_name')
+            fi
+            commit=$(git rev-list -n 1 $now_tag)
+            echo "$commit"
+
+            temp=$(git --no-pager tag | grep $new_tag || echo "")
+            if [[ "$temp" = "$new_tag" ]]; then
+                echo "delete remote tag $new_tag"
+                git push origin --delete $new_tag
+                git tag -d $new_tag
+            fi
+            git tag $new_tag
+            echo "create tag $new_tag"
+            git push origin $new_tag
+            # commit=$(git --no-pager log --pretty=format:"%H" | grep -B 1 $commit | head -n 1)
+            echo "after-$commit"
+            msg=$(git --no-pager log --pretty=format:"- [%s](https://github.com/${{ github.repository}}/commit/%H)" $commit..HEAD)
+
+            cat << 'EOF' > body.md
+              安装dmg后需要执行以下命令，否则会提示包已损坏
+              ```shell
+              sudo xattr -rd com.apple.quarantine /Applications/fontview.app
+              ```
+            EOF
+            echo "" >> body.md
+            echo "$msg" >> body.md
+            echo "tag=$new_tag" >> $GITHUB_OUTPUT
+            # 如果直接指向master，release会落后一个commit
+            # gh release create -n "$msg" --target $new_tag $(date +%Y%m%d) ./app/*
+        - name: Create Release
+          uses: ncipollo/release-action@v1
+          env:
+            GH_TOKEN: ${{ github.token }}
+          with:
+            artifacts: "app/*"
+            bodyFile: "body.md"
+            tag: ${{ steps.ready.outputs.tag }}
