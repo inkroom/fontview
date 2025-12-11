@@ -54,13 +54,31 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - uses: FedericoCarboni/setup-ffmpeg@v3
+        id: setup-ffmpeg
+        with:
+          # A specific version to download, may also be "release" or a specific version
+          # like "6.1.0". At the moment semver specifiers (i.e. >=6.1.0) are supported
+          # only on Windows, on other platforms they are allowed but version is matched
+          # exactly regardless.
+          ffmpeg-version: release
+          # Target architecture of the ffmpeg executable to install. Defaults to the
+          # system architecture. Only x64 and arm64 are supported (arm64 only on Linux).
+          architecture: ''
+          # Linking type of the binaries. Use "shared" to download shared binaries and 
+          # "static" for statically linked ones. Shared builds are currently only available
+          # for windows releases. Defaults to "static"
+          linking-type: static
+          # As of version 3 of this action, builds are no longer downloaded from GitHub
+          # except on Windows: https://github.com/GyanD/codexffmpeg/releases.
+          github-token: ${{ github.server_url == 'https://github.com' && github.token || '' }}
       - name: Rust
         uses: brndnmtthws/rust-action-rustup@v1
         with:
          toolchain: ${{ env.RUST_VERSION }}
       - name: Build
         run: |
-          mkdir out
+          ffmpeg -i img/ico.png -vf "scale=48:48" windows.ico 
           cargo build --release
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -92,11 +110,6 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Bundle"
-          # 实现dock栏隐藏图标
-          echo "<key>LSUIElement</key>" > info.ext
-          echo "<true/>" >> info.ext
-          echo "" >> Cargo.toml
-          echo 'osx_info_plist_exts=["info.ext"]' >> Cargo.toml
           cargo bundle -r -f osx --features "pkg" 
           curr=$(pwd)
           cd target/release/bundle/osx/
@@ -144,6 +157,9 @@ jobs:
               echo "delete $now_tag"
               gh release delete $now_tag
               now_tag=$(curl -sSf https://api.github.com/repos/${{ github.repository}}/releases | jq --raw-output '.[0].tag_name')
+              if [[ "$now_tag" = "null" ]]; then
+                now_tag=""
+              fi
             fi
             if [[ "$now_tag" != "" ]]; then
               commit=$(git rev-list -n 1 $now_tag)
