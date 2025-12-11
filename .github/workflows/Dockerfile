@@ -1,7 +1,7 @@
 ARG RUST_VERSION=1.90.0
-FROM blackdex/rust-musl:aarch64-musl-1.90.0 as m
-RUN sed -i "s@http://.*archive.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list.d/ubuntu.sources && sed -i "s@http://.*security.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list.d/ubuntu.sources && sed -i "s@http://ports.ubuntu.com@http://mirrors.huaweicloud.com@g" /etc/apt/sources.list.d/ubuntu.sources && apt update -y && apt upgrade -y
-
+FROM rust:${RUST_VERSION} as m
+RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list.d/debian.sources && apt update -y && apt upgrade -y
+RUN arch && apt install -y musl-tools && rustup target add $(arch)-unknown-linux-musl
 #FROM registry.gitlab.com/rust_musl_docker/image:stable-latest as m
 WORKDIR /app
 COPY . /app

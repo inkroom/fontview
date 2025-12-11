@@ -4,7 +4,8 @@
 use core::f32;
 use eframe::{
     egui::{
-        self, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, RichText, ScrollArea, TextEdit, Ui, Window,
+        self, FontData, FontDefinitions, FontFamily, FontId, Id, Modal, RichText, ScrollArea,
+        TextEdit, Ui, Window,
     },
     epaint::text::FontInsert,
 };
@@ -14,6 +15,12 @@ use std::{
     ffi::OsString,
     path::PathBuf,
     process::exit,
+    sync::{
+        Arc,
+        mpsc::{Receiver, Sender},
+    },
+    thread,
+    time::Duration,
 };
 
 use crate::font_info::dump;
@@ -331,6 +338,12 @@ struct FontInner {
     file_name: String,
 }
 
+enum Msg {
+    Cancel,
+    Dir(String),
+    Font(Vec<FontInner>),
+}
+
 struct FontViewApp {
     dir: String,
     loading: bool,
@@ -338,10 +351,13 @@ struct FontViewApp {
     example: String,
     subset: SubsetModal,
     subset_open: bool,
+    sx: Sender<Msg>,
+    rx: Receiver<Msg>,
 }
 
 impl FontViewApp {
     fn default(cc: &egui::Context) -> Self {
+        let (sx, rx) = std::sync::mpsc::channel();
         let res = Self {
             font: Vec::new(),
             loading: false,
@@ -349,6 +365,8 @@ impl FontViewApp {
             example: "测试文本".to_string(),
             subset: SubsetModal::default(),
             subset_open: false,
+            sx,
+            rx,
         };
 
         // 使用最大的字体文件，大概率能支持更多字符
@@ -449,7 +467,7 @@ fn setup_fonts(ctx: &egui::Context, dir: &PathBuf) -> Vec<FontInner> {
             }],
         ));
 
-        let font_name_real = dump(&cow.to_owned());
+        let font_name_real = dump(&cow.clone());
         fm.push(FontInner {
             font_name: font_name_real,
             path: font_path.clone(),
@@ -474,27 +492,62 @@ impl eframe::App for FontViewApp {
                 ui.heading("font file dir: ");
                 ui.label(&self.dir);
                 if ui.button("Dir").clicked() {
-                    self.loading = true;
-                    ctx.request_repaint();
-                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                        self.font = setup_fonts(ctx, &dir);
-                        self.dir = format!("{:?}", dir.display()).replace("\"", "");
-                    } else {
+                    let cc = ctx.clone();
+                    let sx = Arc::new(self.sx.clone());
+                    thread::spawn(move || {
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            let dir_s = format!("{:?}", dir.display()).replace("\"", "");
+
+                            let _ = sx.send(Msg::Dir(dir_s));
+                            cc.request_repaint();
+
+                            let font = setup_fonts(&cc, &dir);
+
+                            loop {
+                                let r = font.iter().any(|ele| {
+                                    !cc.fonts(|f| {
+                                        f.lock()
+                                            .fonts
+                                            .definitions()
+                                            .font_data
+                                            .contains_key(ele.mock_name.as_str())
+                                    })
+                                });
+                                if r {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_millis(100));
+                            }
+                            let _ = sx.send(Msg::Font(font));
+                            cc.request_repaint();
+                        } else {
+                            let _ = sx.send(Msg::Cancel);
+                            cc.request_repaint();
+                        }
+                    });
+                }
+            });
+
+            if let Ok(r) = self.rx.try_recv() {
+                match r {
+                    Msg::Dir(dir) => {
+                        self.dir = dir;
+                        self.loading = true;
+                        // ctx.request_repaint();
+                    }
+                    Msg::Font(font) => {
+                        self.font = font;
+                        self.loading = false;
+                        // ctx.request_repaint();
+                    }
+                    Msg::Cancel => {
                         self.loading = false;
                     }
                 }
-            });
+            }
+
             if !self.dir.is_empty() && self.loading {
                 ui.label("loading....");
-                self.loading = self.font.iter().any(|ele| {
-                    !ctx.fonts(|f| {
-                        f.lock()
-                            .fonts
-                            .definitions()
-                            .font_data
-                            .contains_key(ele.mock_name.as_str())
-                    })
-                });
             } else {
                 ScrollArea::vertical()
                     .auto_shrink(false)
@@ -922,14 +975,14 @@ mod font_info {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        if (ext.to_lowercase() == "ttf"
+                    if let Some(ext) = path.extension().and_then(|e| e.to_str())
+                        && (ext.to_lowercase() == "ttf"
                             || ext.to_lowercase() == "otf"
                             || ext.to_lowercase() == "ttc")
-                            && is_chinese_font(&path) {
-                                chinese_fonts.push(path.to_string_lossy().into_owned());
-                            }
-                    }
+                            && is_chinese_font(&path)
+                        {
+                            chinese_fonts.push(path.to_string_lossy().into_owned());
+                        }
                 }
             }
         }
