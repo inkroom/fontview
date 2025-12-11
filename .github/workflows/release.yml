@@ -61,13 +61,13 @@ jobs:
       - name: Build
         run: |
           mkdir out
-          cargo build --release && cp target/release/fontview ./out/fontview
+          cargo build --release
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-           name: app-mac-arm
-           path: out/*
-  mac-m1:
+           name: app-windows
+           path: target/release/fontview.exe
+  mac-arm:
     runs-on: macos-14
     steps:
       - name: Checkout repository
@@ -79,6 +79,10 @@ jobs:
       - name: Build
         run: |
           mkdir out
+          brew install ffmpeg
+          ffmpeg -i img/ico.png -vf "scale=256:256" out.png
+          rm img/ico.png
+          mv out.png img/ico.png
           cargo build --release && cp target/release/fontview ./out/fontview-mac-arm
       - name: Bundle
         run: |
@@ -113,7 +117,7 @@ jobs:
            path: out/*
   release:
     runs-on: ubuntu-22.04
-    needs: ["mac-m1","linux","windows"]
+    needs: ["mac-arm","linux","windows"]
     permissions:
         contents: write
         packages: write
@@ -141,8 +145,11 @@ jobs:
               gh release delete $now_tag
               now_tag=$(curl -sSf https://api.github.com/repos/${{ github.repository}}/releases | jq --raw-output '.[0].tag_name')
             fi
-            commit=$(git rev-list -n 1 $now_tag)
-            echo "$commit"
+            if [[ "$now_tag" != "" ]]; then
+              commit=$(git rev-list -n 1 $now_tag)
+              echo "$commit"
+            fi
+            
 
             temp=$(git --no-pager tag | grep $new_tag || echo "")
             if [[ "$temp" = "$new_tag" ]]; then

@@ -24,6 +24,6 @@ print=["dep:log","dep:env_logger"]
 
 
 [package.metadata.bundle]
-identifier="cn.inkroom.clipboard"
+identifier="cn.inkroom.fontview"
 icon = ["img/ico.png"]
 resources=["img"]

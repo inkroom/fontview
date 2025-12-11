@@ -5,10 +5,7 @@ RUN arch && apt install -y musl-tools && rustup target add $(arch)-unknown-linux
 #FROM registry.gitlab.com/rust_musl_docker/image:stable-latest as m
 WORKDIR /app
 COPY . /app
-RUN cargo clean &&  cargo build --release --config source.crates-io.replace-with=\"mirror\" \
-    --config source.mirror.registry=\"sparse+https://mirrors.ustc.edu.cn/crates.io-index/\" \
-    && cargo build --release --config source.crates-io.replace-with=\"mirror\" \
-    --config source.mirror.registry=\"sparse+https://mirrors.ustc.edu.cn/crates.io-index/\" -vv \
+RUN cargo clean && cargo build --release -vv \
     --target=$(arch)-unknown-linux-musl \
     && mkdir out \
     && mv target/$(arch)-unknown-linux-musl/release/fontview ./out/fontview
