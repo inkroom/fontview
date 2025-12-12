@@ -291,11 +291,12 @@ OPTIONS:
                     .read::<allsorts::font_data::FontData>()
                     .expect("load font fail");
                 let provider = font_file.table_provider(0).unwrap();
-                if font_info::subset_text(
+                if let Some(n) = font_info::subset_text(
                     &provider,
                     text.as_str(),
                     &std::path::Path::new(&output).to_path_buf(),
                 ) {
+                    println!("{}", n);
                 } else {
                     eprintln!("subset fail");
                     exit(101);
@@ -479,7 +480,10 @@ fn setup_fonts(ctx: &egui::Context, dir: &PathBuf) -> Vec<FontInner> {
 
         let cow: std::borrow::Cow<'_, [u8]> =
             std::borrow::Cow::Owned(std::fs::read(font_path).expect("read fail"));
-
+        let font_name_real = dump(&cow.clone());
+        if font_name_real.is_empty() {
+            continue;
+        }
         ctx.add_font(FontInsert::new(
             font_name,
             FontData {
@@ -494,7 +498,6 @@ fn setup_fonts(ctx: &egui::Context, dir: &PathBuf) -> Vec<FontInner> {
             }],
         ));
 
-        let font_name_real = dump(&cow.clone());
         fm.push(FontInner {
             font_name: font_name_real,
             path: font_path.clone(),
@@ -529,21 +532,22 @@ impl eframe::App for FontViewApp {
                             cc.request_repaint();
 
                             let font = setup_fonts(&cc, &dir);
-
-                            loop {
-                                let r = font.iter().any(|ele| {
-                                    !cc.fonts(|f| {
-                                        f.lock()
-                                            .fonts
-                                            .definitions()
-                                            .font_data
-                                            .contains_key(ele.mock_name.as_str())
-                                    })
-                                });
-                                if r {
-                                    break;
+                            if !font.is_empty() {
+                                loop {
+                                    let r = font.iter().any(|ele| {
+                                        !cc.fonts(|f| {
+                                            f.lock()
+                                                .fonts
+                                                .definitions()
+                                                .font_data
+                                                .contains_key(ele.mock_name.as_str())
+                                        })
+                                    });
+                                    if r {
+                                        break;
+                                    }
+                                    std::thread::sleep(Duration::from_millis(100));
                                 }
-                                std::thread::sleep(Duration::from_millis(100));
                             }
                             let _ = sx.send(Msg::Font(font));
                             cc.request_repaint();
@@ -573,31 +577,35 @@ impl eframe::App for FontViewApp {
                 }
             }
 
-            if !self.dir.is_empty() && self.loading {
-                ui.label("loading....");
-            } else {
-                ScrollArea::vertical()
-                    .auto_shrink(false)
-                    .scroll_bar_visibility(
-                        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                    )
-                    .show(ui, |ui| {
-                        ui.with_layout(
-                            egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
-                            |ui| {
-                                if !self.loading {
-                                    for ele in self.font.iter() {
-                                        view_panel(ui, &self.example, ele, |ui, font| {
-                                            // self.subset.show(ui.ctx(), font);
-                                            self.subset_open = true;
-                                            self.subset.font = Some(font.clone());
-                                            self.subset.text = self.example.clone();
-                                        });
+            if !self.dir.is_empty() {
+                if self.loading {
+                    ui.label("loading....");
+                } else if self.font.is_empty() {
+                    ui.label("no font");
+                } else {
+                    ScrollArea::vertical()
+                        .auto_shrink(false)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                        )
+                        .show(ui, |ui| {
+                            ui.with_layout(
+                                egui::Layout::top_down(egui::Align::LEFT).with_cross_justify(true),
+                                |ui| {
+                                    if !self.loading {
+                                        for ele in self.font.iter() {
+                                            view_panel(ui, &self.example, ele, |ui, font| {
+                                                // self.subset.show(ui.ctx(), font);
+                                                self.subset_open = true;
+                                                self.subset.font = Some(font.clone());
+                                                self.subset.text = self.example.clone();
+                                            });
+                                        }
                                     }
-                                }
-                            },
-                        );
-                    });
+                                },
+                            );
+                        });
+                }
             }
         });
         if self.subset_open {
@@ -643,7 +651,7 @@ struct SubsetModal {
     text: String,
     font: Option<FontInner>,
     notify_modal: bool,
-    result: bool,
+    result: Option<String>,
 }
 
 impl SubsetModal {
@@ -654,18 +662,16 @@ impl SubsetModal {
             ..
         } = self;
         if *notify_modal {
-            let modal = Modal::new(Id::new(if *result { "Success" } else { "fail" })).show(
-                ui.ctx(),
-                |ui| {
+            let modal = Modal::new(Id::new(if result.is_some() { "Success" } else { "fail" }))
+                .show(ui.ctx(), |ui| {
                     ui.set_width(200.0);
-                    ui.heading(if *result { "Success" } else { "fail" });
+                    ui.heading(if result.is_some() { "Success" } else { "fail" });
 
                     ui.add_space(32.0);
                     if ui.button("Ok").clicked() {
                         ui.close();
                     }
-                },
-            );
+                });
 
             if modal.should_close() {
                 *notify_modal = false;
@@ -716,7 +722,7 @@ mod font_info {
     use allsorts::gsub::{GlyphOrigin, RawGlyph, RawGlyphFlags};
     use allsorts::subset::SubsetProfile;
 
-    use allsorts::binary::read::ReadScope;
+    use allsorts::binary::read::{ReadScope, ReadScopeOwned};
     use allsorts::error::ParseError;
     use allsorts::font_data::FontData;
     use allsorts::tables::{FontTableProvider, NameTable, OffsetTable, OpenTypeData, TTCHeader};
@@ -732,7 +738,7 @@ mod font_info {
         font_provider: &F,
         text: &str,
         output_path: &PathBuf,
-    ) -> bool {
+    ) -> Option<String> {
         let text = format!("{text}?◻"); // 添加两个占位符，用于字符不存在时渲染，避免完全不渲染的空白
 
         match do_subset_text(
@@ -740,10 +746,10 @@ mod font_info {
             remove_duplicate_chars(&text).as_str(),
             output_path,
         ) {
-            Ok(_) => true,
+            Ok(v) => String::from_utf8(v).ok(),
             Err(e) => {
                 s_error!("subset fail {:?}", e);
-                false
+                None
             }
         }
     }
@@ -762,11 +768,19 @@ mod font_info {
         result
     }
 
+    /// 随机数算法
+    fn lcg(seed: u32) -> u32 {
+        let a: u64 = 1664525;
+        let c: u64 = 1013904223;
+        let m: u64 = 1 << 32;
+        ((a as u64 * seed as u64 + c) % m) as u32
+    }
+
     fn do_subset_text<F: FontTableProvider>(
         font_provider: &F,
         text: &str,
         output_path: &PathBuf,
-    ) -> Result<(), BoxError> {
+    ) -> Result<Vec<u8>, BoxError> {
         // Work out the glyphs we want to keep from the text
         let mut glyphs = chars_to_glyphs(font_provider, text).unwrap();
         let notdef = RawGlyph {
@@ -794,17 +808,38 @@ mod font_info {
         s_info!("Number of glyphs in new font: {}", glyph_ids.len());
 
         // Subset
-        let new_font = allsorts::subset::subset(
+        let mut new_font = allsorts::subset::subset(
             font_provider,
             &glyph_ids,
             &SubsetProfile::Minimal,
             allsorts::subset::CmapTarget::Unrestricted,
         )?;
 
+        let name = do_dump(new_font.as_slice())?;
+        let mut REP = Vec::new();
+        if let Some(name) = name.1 {
+            // 修改name
+            let V = b"QWERTYUIOPASDFGHJKLMNBVCXZ";
+
+            let mut seed = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_millis() as u32;
+            let len = name.scope().data().len();
+
+            for i in 0..len {
+                seed = lcg(seed);
+                let s = seed % V.len() as u32;
+                let t = V[s as usize];
+                new_font[name.base + i] = t;
+                REP.push(t);
+            }
+        }
+
         // Write out the new font
         let mut output = std::fs::File::create(output_path)?;
         output.write_all(&new_font)?;
-        Ok(())
+
+        Ok(REP)
     }
 
     fn chars_to_glyphs<F: FontTableProvider>(
@@ -852,14 +887,14 @@ mod font_info {
     }
     pub(crate) fn dump(data: &[u8]) -> String {
         match do_dump(data) {
-            Ok(v) => v,
+            Ok(v) => v.0,
             Err(e) => {
                 s_error!("dump error {:?}", e);
                 String::new()
             }
         }
     }
-    fn do_dump(data: &[u8]) -> Result<String, BoxError> {
+    fn do_dump(data: &[u8]) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         let scope = ReadScope::new(data);
         let font_file = scope.read::<FontData>()?;
 
@@ -873,26 +908,32 @@ mod font_info {
         }
     }
 
-    fn dump_ttc<'a>(scope: &ReadScope<'a>, ttc: &TTCHeader<'a>) -> Result<String, BoxError> {
+    fn dump_ttc<'a>(
+        scope: &ReadScope<'a>,
+        ttc: &TTCHeader<'a>,
+    ) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         if let Some(offset_table_offset) = (&ttc.offset_tables).into_iter().next() {
             let offset_table_offset =
                 usize::try_from(offset_table_offset).map_err(ParseError::from)?;
             let offset_table = scope.offset(offset_table_offset).read::<OffsetTable>()?;
             return dump_ttf(scope, &offset_table);
         }
-        Ok(String::new())
+        Ok((String::new(), None))
     }
 
-    fn dump_ttf<'a>(scope: &ReadScope<'a>, ttf: &OffsetTable<'a>) -> Result<String, BoxError> {
+    fn dump_ttf<'a>(
+        scope: &ReadScope<'a>,
+        ttf: &OffsetTable<'a>,
+    ) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         if let Some(name_table_data) = ttf.read_table(scope, tag::NAME)? {
             let name_table = name_table_data.read::<NameTable>()?;
             return dump_name_table(&name_table);
         }
 
-        Ok(String::new())
+        Ok((String::new(), None))
     }
 
-    fn dump_woff(woff: &WoffFont<'_>) -> Result<String, BoxError> {
+    fn dump_woff(woff: &WoffFont<'_>) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         if let Some(entry) = woff
             .table_directory
             .iter()
@@ -903,19 +944,24 @@ mod font_info {
             return dump_name_table(&name_table);
         }
 
-        Ok(String::new())
+        Ok((String::new(), None))
     }
 
-    fn dump_woff2<'a>(woff: &Woff2Font<'a>, index: usize) -> Result<String, BoxError> {
+    fn dump_woff2<'a>(
+        woff: &Woff2Font<'a>,
+        index: usize,
+    ) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         if let Some(table) = woff.read_table(tag::NAME, index)? {
             s_info!();
             let name_table = table.scope().read::<NameTable>()?;
             return dump_name_table(&name_table);
         }
 
-        Ok(String::new())
+        Ok((String::new(), None))
     }
-    fn dump_name_table(name_table: &allsorts::tables::NameTable) -> Result<String, BoxError> {
+    fn dump_name_table(
+        name_table: &allsorts::tables::NameTable,
+    ) -> Result<(String, Option<ReadScopeOwned>), BoxError> {
         use encoding_rs::{MACINTOSH, UTF_16BE};
         for name_record in &name_table.name_records {
             let platform = name_record.platform_id;
@@ -923,10 +969,8 @@ mod font_info {
             let language = name_record.language_id;
             let offset = usize::from(name_record.offset);
             let length = usize::from(name_record.length);
-            let name_data = name_table
-                .string_storage
-                .offset_length(offset, length)?
-                .data();
+            let name_scope = name_table.string_storage.offset_length(offset, length)?;
+            let name_data = name_scope.data();
 
             // s_info!(
             //     "offset={}, length = {length},{:?}",
@@ -945,10 +989,10 @@ mod font_info {
                 ),
             };
             if let NameTable::FULL_FONT_NAME = name_record.name_id {
-                return Ok(name);
+                return Ok((name, Some(ReadScopeOwned::new(name_scope))));
             }
         }
-        Ok(String::new())
+        Ok((String::new(), None))
     }
 
     fn decode(encoding: &'static encoding_rs::Encoding, data: &[u8]) -> String {
@@ -961,5 +1005,4 @@ mod font_info {
             String::new() // can only happen if buffer is enormous
         }
     }
-
 }
