@@ -315,7 +315,7 @@ OPTIONS:
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([400.0, 500.0])
             .with_icon(eframe::icon_data::from_png_bytes(&icon_data()).unwrap())
-            .with_taskbar(false),
+            .with_taskbar(true),
         ..Default::default()
     };
 
@@ -369,17 +369,44 @@ impl FontViewApp {
             rx,
         };
 
-        // 使用最大的字体文件，大概率能支持更多字符
-        let ch = font_info::find_chinese_fonts();
-        let max = ch
-            .iter()
-            .map(|f| (std::fs::metadata(f).map(|h| h.len()).unwrap_or_default(), f))
-            .max_by(|a, b| a.0.cmp(&b.0));
+        use rust_fontconfig::{FcFontCache, FcPattern};
+        let fc = FcFontCache::build();
 
-        if let Some((_, path)) = max {
+        let mut trace = Vec::new();
+        #[cfg(target_os = "macos")]
+        let re = fc.query(
+            &FcPattern {
+                family: Some("Heiti".to_string()),
+                ..Default::default()
+            },
+            &mut trace,
+        );
+        #[cfg(target_os = "windows")]
+        let re = fc.query(
+            &FcPattern {
+                family: Some("SimSun".to_string()),
+                ..Default::default()
+            },
+            &mut trace,
+        );
+        #[cfg(target_os = "linux")]
+        let re = fc.query(
+            &FcPattern {
+                family: Some("CJK".to_string()),
+                ..Default::default()
+            },
+            &mut trace,
+        );
+
+        if let Some(result) = re
+            && let Some(source) = fc.get_font_by_id(&result.id)
+        {
             cc.add_font(FontInsert::new(
                 "example",
-                FontData::from_owned(std::fs::read(path).unwrap()),
+                FontData::from_owned(match source {
+                    rust_fontconfig::FontSource::Disk(path) => std::fs::read(&path.path).unwrap(),
+                    rust_fontconfig::FontSource::Memory(b) => b.bytes.clone(),
+                }),
                 vec![
                     egui::epaint::text::InsertFontFamily {
                         family: egui::FontFamily::Proportional,
@@ -935,58 +962,4 @@ mod font_info {
         }
     }
 
-    use std::fs::File;
-    use std::io::Read;
-    use std::path::Path;
-    use ttf_parser::Face;
-
-    fn is_chinese_font(font_path: &Path) -> bool {
-        let mut buffer = Vec::new();
-        if let Ok(mut file) = File::open(font_path) {
-            if let Err(e) = file.read_to_end(&mut buffer) {
-                eprintln!("Failed to read font file: {}", e);
-                return false;
-            }
-        } else {
-            return false;
-        }
-
-        let face = match Face::parse(&buffer, 0) {
-            Ok(face) => face,
-            Err(e) => {
-                eprintln!("Failed to parse font: {}", e);
-                return false;
-            }
-        };
-        // 可能出现占位符，所以需要用两个字符判断
-        face.glyph_index('中') != face.glyph_index('文')
-    }
-
-    pub(crate) fn find_chinese_fonts() -> Vec<String> {
-        #[cfg(target_os = "windows")]
-        let dirs = ["C:/Windows/Fonts"];
-        #[cfg(target_os = "linux")]
-        let dirs = ["/usr/share/fonts", "/usr/local/share/fonts"];
-        #[cfg(target_os = "macos")]
-        let dirs = ["/System/Library/Fonts", "/Library/Fonts"];
-        let mut chinese_fonts = Vec::new();
-
-        for dir in dirs {
-            if let Ok(entries) = std::fs::read_dir(dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str())
-                        && (ext.to_lowercase() == "ttf"
-                            || ext.to_lowercase() == "otf"
-                            || ext.to_lowercase() == "ttc")
-                            && is_chinese_font(&path)
-                        {
-                            chinese_fonts.push(path.to_string_lossy().into_owned());
-                        }
-                }
-            }
-        }
-
-        chinese_fonts
-    }
 }
