@@ -17,7 +17,7 @@
 			]
 		}
 	},
-	"onCreateCommand": "git config user.name $(git --no-pager log --pretty=\"%an\" | head -n 1) && git config user.email $(git --no-pager log --pretty=\"%ce\" | head -n 1) && (test -e geckodriver || ( git clone https://github.com/yeslogic/allsorts && cd allsorts && git checkout -b 0.16.1 && sed -i \"31 s@base@pub base@;36 s@base@pub base@\" src/binary/read.rs ) ) && cargo clean && cargo build",
+	"onCreateCommand": "git config user.name $(git --no-pager log --pretty=\"%an\" | head -n 1) && git config user.email $(git --no-pager log --pretty=\"%ce\" | head -n 1) && cargo clean && cargo build --features print",
 	"containerEnv": {
 		"DISPLAY": ":1",
 		"VNCPASS": "font"

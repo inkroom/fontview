@@ -18,10 +18,10 @@ ENV TZ=Asia/Shanghai
 #ENV RUSTUP_UPDATE_ROOT=https://mirror.iscas.ac.cn/rustup/rustup
 
 
-RUN dpkgArch="$(dpkg --print-architecture)"; \
+RUN dpkgArch="$(dpkg --print-architecture)";echo "epk $dpkgArch"; \
     case "${dpkgArch##*-}" in \
         amd64) sed -i "s@http://.*archive.ubuntu.com@http://mirrors.huaweicloud.com@g" /etc/apt/sources.list && sed -i "s@http://.*security.ubuntu.com@http://mirrors.huaweicloud.com@g" /etc/apt/sources.list ;; \
-        arm64) sed -i "s@http://ports.ubuntu.com@https://mirrors.tuna.tsinghua.edu.cn@g" /etc/apt/sources.list  ;; \
+        arm64) sed -i "s@http://mirrors.huaweicloud.com@https://mirror.sjtu.edu.cn@g" /etc/apt/sources.list  ;; \
         *) echo >&2 "unsupported architecture: ${dpkgArch}" ;; \
     esac; apt update -y
 RUN apt install -y git zsh vim fonts-wqy-zenhei && git config --global core.editor vim
@@ -55,5 +55,4 @@ RUN echo "export CARGO_HOME=${CARGO_HOME}" >> /etc/profile \
     && echo "export PATH=${PATH}" >> /root/.zshrc
 ENV VNCNAME "novel"
 RUN sed -i "s@-fg@-fg -desktop ${VNCNAME}@g" /app/tiger.sh
-RUN sh /app/scripts/prepare_firefox_ppa.sh && apt update -y && apt install -y firefox
-RUN apt install -y gcc g++ make pkg-config libssl-dev unzip libxkbcommon-dev libxkbcommon-x11-dev libfreetype6-dev libfontconfig1-dev
+RUN apt install -y gcc g++ make pkg-config libssl-dev unzip libxkbcommon-dev libxkbcommon-x11-dev zenity

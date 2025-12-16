@@ -393,7 +393,7 @@ impl FontViewApp {
         #[cfg(target_os = "linux")]
         let re = fc.query(
             &FcPattern {
-                family: Some("CJK".to_string()),
+                family: Some("WenQuanYi Zen Hei".to_string()),
                 ..Default::default()
             },
             &mut trace,
@@ -444,7 +444,7 @@ fn setup_fonts(ctx: &egui::Context, dir: &PathBuf) -> Vec<FontInner> {
         }
     }
 
-    let fonts = FontDefinitions::default();
+    let _fonts = FontDefinitions::default();
 
     // 这里需要替换为实际的中文字体文件路径
     // 假设我们有三种不同的中文字体
@@ -594,7 +594,7 @@ impl eframe::App for FontViewApp {
                                 |ui| {
                                     if !self.loading {
                                         for ele in self.font.iter() {
-                                            view_panel(ui, &self.example, ele, |ui, font| {
+                                            view_panel(ui, &self.example, ele, |_ui, font| {
                                                 // self.subset.show(ui.ctx(), font);
                                                 self.subset_open = true;
                                                 self.subset.font = Some(font.clone());
@@ -747,7 +747,7 @@ mod font_info {
             output_path,
         ) {
             Ok(v) => String::from_utf8(v).ok(),
-            Err(e) => {
+            Err(_e) => {
                 s_error!("subset fail {:?}", e);
                 None
             }
@@ -773,7 +773,7 @@ mod font_info {
         let a: u64 = 1664525;
         let c: u64 = 1013904223;
         let m: u64 = 1 << 32;
-        ((a as u64 * seed as u64 + c) % m) as u32
+        ((a * seed as u64 + c) % m) as u32
     }
 
     fn do_subset_text<F: FontTableProvider>(
@@ -816,10 +816,10 @@ mod font_info {
         )?;
 
         let name = do_dump(new_font.as_slice())?;
-        let mut REP = Vec::new();
+        let mut rep = Vec::new();
         if let Some(name) = name.1 {
             // 修改name
-            let V = b"QWERTYUIOPASDFGHJKLMNBVCXZ";
+            let v = b"QWERTYUIOPASDFGHJKLMNBVCXZ";
 
             let mut seed = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)?
@@ -828,10 +828,10 @@ mod font_info {
 
             for i in 0..len {
                 seed = lcg(seed);
-                let s = seed % V.len() as u32;
-                let t = V[s as usize];
+                let s = seed % v.len() as u32;
+                let t = v[s as usize];
                 new_font[name.base + i] = t;
-                REP.push(t);
+                rep.push(t);
             }
         }
 
@@ -839,7 +839,7 @@ mod font_info {
         let mut output = std::fs::File::create(output_path)?;
         output.write_all(&new_font)?;
 
-        Ok(REP)
+        Ok(rep)
     }
 
     fn chars_to_glyphs<F: FontTableProvider>(
@@ -888,7 +888,7 @@ mod font_info {
     pub(crate) fn dump(data: &[u8]) -> String {
         match do_dump(data) {
             Ok(v) => v.0,
-            Err(e) => {
+            Err(_e) => {
                 s_error!("dump error {:?}", e);
                 String::new()
             }
