@@ -36,7 +36,7 @@ macro_rules! s_error {
         log::error!($($arg)+);
         // 避免clippy或者ide认为参数没有被使用
         #[cfg(not(feature="print"))]
-        let _ = format!($($arg)+);  
+        let _ = format!($($arg)+);
     )
 }
 
@@ -51,7 +51,7 @@ macro_rules! s_info {
         log::info!($($arg)+);
         // 避免clippy或者ide认为参数没有被使用
         #[cfg(not(feature="print"))]
-        let _ = format!($($arg)+);       
+        let _ = format!($($arg)+);
     }};
     () => (
 
@@ -60,12 +60,7 @@ macro_rules! s_info {
     )
 }
 
-/// 非打包情况下直接包含字节
-#[cfg(not(feature = "pkg"))]
-fn icon_data() -> Vec<u8> {
-    let b = include_bytes!("../img/ico.png");
-    b.to_vec()
-}
+
 /// bundle内执行方法
 mod bundle {
 
@@ -254,6 +249,13 @@ fn icon_data() -> Vec<u8> {
         }
     }
     Vec::new()
+}
+
+/// 非打包情况下直接包含字节
+#[cfg(not(feature = "pkg"))]
+fn icon_data() -> Vec<u8> {
+    let b = include_bytes!(concat!(env!("OUT_DIR"), "/ico.png"));
+    b.to_vec()
 }
 
 fn main() -> eframe::Result {

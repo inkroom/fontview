@@ -8,3 +8,4 @@ logs
 .idea
 Cargo.lock
 .DS_Store
+img/ico.png

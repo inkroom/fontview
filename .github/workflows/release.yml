@@ -84,10 +84,6 @@ jobs:
       - name: Build
         run: |
           mkdir out
-          brew install ffmpeg
-          ffmpeg -i img/ico.png -vf "scale=256:256" out.png
-          rm img/ico.png
-          mv out.png img/ico.png
           cargo build --release && cp target/release/fontview ./out/fontview-mac-arm
       - name: Bundle
         run: |
