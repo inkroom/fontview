@@ -34,6 +34,9 @@ macro_rules! s_error {
     ($($arg:tt)+) => (
         #[cfg(feature="print")]
         log::error!($($arg)+);
+        // 避免clippy或者ide认为参数没有被使用
+        #[cfg(not(feature="print"))]
+        let _ = format!($($arg)+);  
     )
 }
 
@@ -46,6 +49,9 @@ macro_rules! s_info {
     ($($arg:tt)+) => {{
         #[cfg(feature="print")]
         log::info!($($arg)+);
+        // 避免clippy或者ide认为参数没有被使用
+        #[cfg(not(feature="print"))]
+        let _ = format!($($arg)+);       
     }};
     () => (
 
@@ -747,7 +753,7 @@ mod font_info {
             output_path,
         ) {
             Ok(v) => String::from_utf8(v).ok(),
-            Err(_e) => {
+            Err(e) => {
                 s_error!("subset fail {:?}", e);
                 None
             }
@@ -888,7 +894,7 @@ mod font_info {
     pub(crate) fn dump(data: &[u8]) -> String {
         match do_dump(data) {
             Ok(v) => v.0,
-            Err(_e) => {
+            Err(e) => {
                 s_error!("dump error {:?}", e);
                 String::new()
             }
